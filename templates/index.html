@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>To-Do App</title>
+    <!-- Load Tailwind CSS from CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Simple transition for list items */
+        .task-item {
+            transition: opacity 0.3s ease-out;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans leading-normal tracking-normal">
+
+    <div class="container max-w-lg mx-auto p-6 mt-12">
+        <div class="bg-white p-8 rounded-lg shadow-lg">
+            
+            <!-- Header -->
+            <h1 class="text-3xl font-bold text-center text-gray-800 mb-6">My To-Do List</h1>
+
+            <!-- Add Task Form -->
+            <form id="task-form" class="flex mb-6">
+                <input 
+                    type="text" 
+                    id="task-input" 
+                    placeholder="What needs to be done?" 
+                    class="flex-grow p-3 border border-gray-300 rounded-l-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    autocomplete="off"
+                >
+                <button 
+                    type="submit"
+                    class="bg-blue-500 hover:bg-blue-600 text-white font-bold p-3 px-6 rounded-r-lg transition-colors duration-200"
+                >
+                    Add
+                </button>
+            </form>
+
+            <!-- Task List -->
+            <ul id="task-list" class="space-y-3">
+                <!-- Tasks will be dynamically inserted here -->
+            </ul>
+
+        </div>
+    </div>
+
+    <script>
+        const taskForm = document.getElementById('task-form');
+        const taskInput = document.getElementById('task-input');
+        const taskList = document.getElementById('task-list');
+
+        // --- Core Functions ---
+
+        /**
+         * Fetches tasks from the API and renders them.
+         */
+        async function loadTasks() {
+            try {
+                const response = await fetch('/api/tasks');
+                if (!response.ok) throw new Error('Network response was not ok');
+                const tasks = await response.json();
+                renderTasks(tasks);
+            } catch (error) {
+                console.error('Failed to load tasks:', error);
+                taskList.innerHTML = '<li class="text-red-500">Failed to load tasks.</li>';
+            }
+        }
+
+        /**
+         * Renders the list of tasks to the DOM.
+         */
+        function renderTasks(tasks) {
+            taskList.innerHTML = ''; // Clear current list
+
+            if (tasks.length === 0) {
+                taskList.innerHTML = '<li class="text-gray-500 text-center italic">No tasks yet!</li>';
+                return;
+            }
+
+            tasks.forEach(task => {
+                const li = document.createElement('li');
+                li.className = 'task-item flex items-center justify-between bg-gray-50 p-4 rounded-lg shadow-sm';
+                li.dataset.id = task.id;
+
+                const titleClass = task.completed 
+                    ? 'line-through text-gray-400' 
+                    : 'text-gray-700';
+
+                li.innerHTML = `
+                    <div class="flex items-center space-x-3">
+                        <input 
+                            type="checkbox" 
+                            class="h-5 w-5 text-blue-500 rounded border-gray-300 focus:ring-blue-500"
+                            ${task.completed ? 'checked' : ''}
+                            onchange="toggleTask(${task.id})"
+                        >
+                        <span class="text-lg ${titleClass}">
+                            ${escapeHTML(task.title)}
+                        </span>
+                    </div>
+                    <button 
+                        onclick="deleteTask(${task.id})"
+                        class="text-red-400 hover:text-red-600 font-medium transition-colors duration-200"
+                    >
+                        Delete
+                    </button>
+                `;
+                taskList.appendChild(li);
+            });
+        }
+
+        /**
+         * Handles adding a new task.
+         */
+        async function addTask(event) {
+            event.preventDefault();
+            const title = taskInput.value.trim();
+
+            if (!title) return; // Do nothing if input is empty
+
+            try {
+                const response = await fetch('/api/tasks', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title: title })
+                });
+
+                if (!response.ok) throw new Error('Failed to add task');
+                
+                taskInput.value = ''; // Clear input
+                loadTasks(); // Refresh the list
+            } catch (error) {
+                console.error('Error adding task:', error);
+            }
+        }
+
+        /**
+         * Toggles the completion status of a task.
+         */
+        async function toggleTask(id) {
+            try {
+                const response = await fetch(`/api/tasks/${id}`, {
+                    method: 'PUT'
+                });
+                if (!response.ok) throw new Error('Failed to update task');
+                
+                loadTasks(); // Refresh the list
+            } catch (error) {
+                console.error('Error toggling task:', error);
+            }
+        }
+
+        /**
+         * Deletes a task from the list.
+         */
+        async function deleteTask(id) {
+            try {
+                const response = await fetch(`/api/tasks/${id}`, {
+                    method: 'DELETE'
+                });
+                if (!response.ok) throw new Error('Failed to delete task');
+
+                // Optimistic UI update: remove item immediately
+                const itemToRemove = document.querySelector(`li[data-id="${id}"]`);
+                if (itemToRemove) {
+                    itemToRemove.style.opacity = '0';
+                    setTimeout(() => itemToRemove.remove(), 300);
+                }
+                
+                // We could call loadTasks() for a full refresh,
+                // but an optimistic update feels snappier.
+                // If the delete failed, a full refresh would bring it back.
+                // Let's call loadTasks() after a small delay to ensure consistency
+                // in case the optimistic update fails or other state changes.
+                setTimeout(loadTasks, 500);
+
+            } catch (error) {
+                console.error('Error deleting task:', error);
+                loadTasks(); // Refresh to ensure UI is consistent
+            }
+        }
+
+        /**
+         * Helper to escape HTML to prevent XSS.
+         */
+        function escapeHTML(str) {
+            return str.replace(/[&<>"']/g, function(m) {
+                return {
+                    '&': '&amp;',
+                    '<': '&lt;',
+                    '>': '&gt;',
+                    '"': '&quot;',
+                    "'": '&#039;'
+                }[m];
+            });
+        }
+
+        // --- Event Listeners ---
+        document.addEventListener('DOMContentLoaded', loadTasks);
+        taskForm.addEventListener('submit', addTask);
+    </script>
+
+</body>
+</html>
